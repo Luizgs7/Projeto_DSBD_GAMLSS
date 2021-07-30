@@ -1,0 +1,465 @@
+---
+title: "Projeto Integrador: GLM Binomial Logito"
+author: "Luiz Gabriel de Souza"
+date: "28/07/2021"
+output: 
+  html_document:
+    theme: flatly
+    code_folding: hide
+    toc: true
+    toc_float: true
+    number_sections: true
+    df_print: paged
+---
+
+```{r setup, include=FALSE, warning=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.width=12, fig.height=8)
+setwd("C:/Users/Avell/Google Drive/Luiz Gabriel - PC/13.Pós Data Science UFPR/03.Modelos_Estatisticos/Modulo_03/Projeto")
+```
+<hr>
+# Introdução
+
+Vamos considerar a aplicação de um modelo linear generalizado com resposta binomial e função de ligação logito (regressão logística). Os dados são referentes a uma amostra de 699 nódulos de mama, e estão disponíveis na página da disciplina no arquivo breast.csv. O objetivo é ajustar um modelo preditivo, que permita classificá-los em benignos ou malignos com base num conjunto de covariáveis. As variáveis disponíveis na base são as seguintes: 
+
+- CL: Clump Thickness (Espessura de aglomerado);
+- MA: Marginal Adhesion (Adesão Marginal);
+- BC: Bare Nucleus (Núcleo Nu);
+- Class: benign, para benigno; malignant, para maligno (variável resposta).
+
+<hr>
+
+
+
+# Analise exploratória
+
+## Importando pacotes e dados
+
+```{r warning=FALSE}
+suppressMessages(library(tidyverse))
+suppressMessages(library(GGally))
+suppressMessages(library(summarytools))
+suppressMessages(library(corrplot))
+suppressMessages(library(car))
+suppressMessages(library(caret))
+suppressMessages(library(pROC))
+suppressMessages(library(effects))
+suppressMessages(library(performance))
+suppressMessages(library(kableExtra))
+suppressMessages(library(gridExtra))
+
+
+
+df <- read.table("breast.csv", header = T, sep = ";")
+str(df)
+```
+
+## Medidadas Resumo
+
+As medidades resumos trazem informações básicas sobre os dados, como o valor mínimo, máximo, mediana, etc.
+
+```{r}
+summary(df)
+```
+É possível observar que as variáveis explicativas são normalizadas, ou seja, possuem valor mínimo igual a 1 e valor máximo igual a 10.
+
+## Distribuição dos dados
+### Boxplots
+```{r}
+
+bp1 <- ggplot(data = df, aes(x = "CT", y = CT)) + 
+        geom_boxplot(width = .3, outlier.colour = "red", fill="grey70")+
+        theme_classic(base_size = 16)
+bp2 <- ggplot(data = df, aes(x = "MA", y = MA)) + 
+        geom_boxplot(width = .3, outlier.colour = "red", fill="grey70")+
+        theme_classic(base_size = 16)
+bp3 <- ggplot(data = df, aes(x = "BC", y = BC)) + 
+        geom_boxplot(width = .3, outlier.colour = "red", fill="grey70") +
+        theme_classic(base_size = 16)
+
+# Organiza os gráfica um ao lado do outro
+grid.arrange(bp1, bp2, bp3, ncol=3)
+```
+As variáveis **MA** e **BC**, possuem alguns outliers positivos. Além disso, a variável **MA**, possui uma mediana deslocada do centro do Boxplot, o que indica uma maior concentração dos dados.
+
+### Histogramas
+
+```{r}
+hg1 <- ggplot(df, aes(x=CT, fill=Class)) +
+         geom_histogram( color="white", alpha=0.6, position = 'identity') +
+         scale_fill_manual(values=c("steelblue3", "tomato")) +
+         theme_classic() +
+         labs(fill="")+
+         theme(legend.position="bottom")
+
+hg2 <- ggplot(df, aes(x=MA, fill=Class)) +
+        geom_histogram( color="white", alpha=0.6, position = 'identity') +
+        scale_fill_manual(values=c("steelblue3", "tomato")) +
+        theme_classic() +
+        labs(fill="")+
+        theme(legend.position="bottom")
+  
+hg3 <- ggplot(df, aes(x=BC, fill=Class)) +
+        geom_histogram( color="white", alpha=0.6, position = 'identity') +
+        scale_fill_manual(values=c("steelblue3", "tomato")) +
+        theme_classic() +
+        labs(fill="") +
+        theme(legend.position="bottom")
+  
+# Organiza os gráfica um ao lado do outro
+grid.arrange(hg1, hg2, hg3, ncol=3)
+```
+
+A observação dos histogramas indica que é mais predominante a presença de nódulos malignos quando as variáveis possuem valores mais alto (mais próximos de 10). Além disso, confirma a observação feita sobre o boxplot da variável **MA**, onde observa-se uma concentração acentuada dos dados em torno de zero.
+
+### Boxplots por tipo de nódulo
+```{r}
+
+bp1 <- ggplot(data = df, aes(x = Class, y = CT, fill = Class)) + 
+        geom_boxplot(width = .3, outlier.colour = "red", alpha=0.6)+
+        scale_fill_manual(values=c("steelblue3", "tomato"))+
+        theme_classic(base_size = 16)+
+        theme(legend.position="bottom")
+
+bp2 <- ggplot(data = df, aes(x = Class, y = MA, fill = Class)) + 
+        geom_boxplot(width = .3, outlier.colour = "red", alpha=0.6)+
+        scale_fill_manual(values=c("steelblue3", "tomato"))+
+        theme_classic(base_size = 16)+
+        theme(legend.position="bottom")
+
+bp3 <- ggplot(data = df, aes(x = Class, y = BC, fill = Class)) + 
+        geom_boxplot(width = .3, outlier.colour = "red", alpha=0.6)+
+        scale_fill_manual(values=c("steelblue3", "tomato"))+
+        theme_classic(base_size = 16)+
+        theme(legend.position="bottom")
+
+# Organiza os gráfica um ao lado do outro
+grid.arrange(bp1, bp2, bp3, ncol=3)
+```
+
+O boxplot quebrado por tipo de nódulo indica que a concentração dos dados de nódulos benignos na ditribuição da variável **MA** geram outliers para essa classe. 
+Além disso, indica os nódulos malignos apresentam mediana maior para todas as variáveis, indicando influência positiva no diagnóstico de um tumor quando as variáveis possuem valores maiores.
+
+## Correlograma
+```{r warning=FALSE}
+cor <-  cor(df[,-4])
+corrplot(cor, method="color", type='lower', addCoef.col = "black")
+```
+A matrix de correlação acima indica correlação positiva entre todas as variáveis, com destaque maior para a relação entre as variáveis **MA** e **BC**. Como as correlações não são tão extremas (>80%), veremos nas análises dos resíduos se teremos a presença de multicolineridade entre as variáveis.
+
+
+# Fit do modelo: base de treino
+
+## Separa treino e teste
+
+Para fins preditivos, vamos separar, aleatoriamente, a base em duas (a primeira, com aproximadamente 75% dos dados, para o ajuste, e a outra, com os demais dados, para avalidação). Ajuste o modelo de regressão logística com os dados da primeira amostra.
+
+```{r}
+# Transformação da variável texto para numérica
+df <- df %>%
+        mutate(Class = case_when(Class == "benign" ~ 0,
+                                 Class != "benign" ~ 1))
+```
+
+
+```{r}
+# Escolha da semente aleatório para garantir reproducibilidade
+set.seed(1909)
+
+# Separação de treino e teste
+indice_treino = createDataPartition(y=df$Class, p=0.75, list=FALSE)
+treino = df[indice_treino, ]
+teste = df[-indice_treino, ]
+
+```
+
+## Acurácia, Sensibilidade e Especificidade.
+
+### Definições:
+
+Antes de calcularmos tais métricas, vale uma breve definição das mesmas:
+
+- **Acurácia:** Analisa a quantidade de acertos em relação ao total de classificações, ou seja, a proporção de nódulos malignos e benignos que o modelo de fato conseguiu detectar versus o total de possibilidades. 
+
+- **sensibilidade:** Define-se por *sensibilidade* a capacidade do modelo de detectar nódulos malignos, ou seja, de classificar como malignos os nódulos que de fato o são.
+
+- **Especificidade:** É a capacidade do modelo de classificar como benignos nódulos verdadeiramente benignos.
+
+### Fit da modelo
+
+Vamos utilizar o pacote *stats* para treinar o modelo, com a familia Binomial e função de ligação logit (regressão logística.
+
+```{r}
+# Fit do modelo com os dados de treino
+m1 <- glm(Class ~ .,data = treino, family = binomial(link='logit'))
+summary(m1)
+
+# Armazenando os coeficientes encontrados a nível do preditor (log-odds)
+CT_estimate_m1 <- as.character(round(m1$coefficients[2],3))
+MA_estimate_m1 <- as.character(round(m1$coefficients[3],3))
+BC_estimate_m1 <- as.character(round(m1$coefficients[4],3))
+
+# Armazenando os coeficientes encontrados a nível da resposta (odds)
+CT_estimate_m1_exp <- as.character(round(exp(m1$coefficients[2]),3))
+MA_estimate_m1_exp <- as.character(round(exp(m1$coefficients[3]),3))
+BC_estimate_m1_exp <- as.character(round(exp(m1$coefficients[4]),3))
+```
+
+É possível observar que todas as variáveis apresentaram significância estatística, com um erro padrão baixo e contribuem para o modelo com estimadores positivos.
+A log-chance de ser um nódulo maligno aumenta `r CT_estimate_m1` e `r BC_estimate_m1` para cada 1 unidade a mais nas variáveis **CT** e **BC**, respectivamente. Da mesma maneira, realizando a tranforção dos resultados em termos de log-chance para chance aplicando o exponencial, é possível dizer que um nódulo maligno aumenta `r CT_estimate_m1_exp` e `r BC_estimate_m1_exp` para cada 1 unidade a mais nas variáveis **CT** e **BC**, respectivamente.
+
+### Criação da função para testes
+
+Para obter os dados preditos e testar para diferentes níveis de *threshold* (corte), criarei uma função para facilitar o trabalho repetitivo que recebe como parâmetro o próprio *threshold* e o tipo de dado que será usado no calculo, base de treino ou a base de teste. Lembrando que o modelo foi computado(fit) com a base treino.
+
+```{r}
+# Função para predict de diferentes threshoulds e treino/teste
+pred_m1 <- function(p, tipo){
+                  if (tipo == "treino"){
+                pred_treino_prob <- predict(m1, newdata = treino[,-4], type = 'response')
+                pred_treino <- ifelse(pred_treino_prob > p, 1, 0)
+                cfm_treino <- confusionMatrix(data=factor(pred_treino), reference = factor(treino[,4])) #mode = "prec_recall"
+                return(cfm_treino)
+                  } 
+                  if (tipo == "teste"){
+                pred_teste_prob <- predict(m1, newdata = teste[,-4], type = 'response')
+                pred_teste <- ifelse(pred_teste_prob > p, 1, 0)
+                cfm_teste <- confusionMatrix(data=factor(pred_teste), reference = factor(teste[,4])) #mode = "prec_recall"
+                return(cfm_teste)
+              }
+}
+
+# Função para imprimir tabela estilizado no documento html
+metrics_m1 <- function(p, tipo) {
+  metricas <- data.frame(Acurácia = round(pred_m1(p=p,tipo=tipo)$overall["Accuracy"],4),
+                         Sensibilidade = round(pred_m1(p=p,tipo=tipo)$byClass["Sensitivity"],4),
+                         Especificidade = round(pred_m1(p=p,tipo=tipo)$byClass["Specificity"],4),
+                         row.names = NULL) %>%
+              kbl() %>%
+              kable_material_dark(c("striped", "hover"))
+  return(metricas)
+}
+
+```
+### Testando *thresholds*
+
+### p>0.1 {.tabset}
+#### Treino
+```{r}
+metrics_m1(0.1,"treino")
+```
+#### Teste
+```{r}
+metrics_m1(0.1,"teste")
+```
+
+### p>0.3 {.tabset}
+#### Treino
+```{r}
+metrics_m1(0.3,"treino")
+```
+#### Teste
+```{r}
+metrics_m1(0.3,"teste")
+```
+
+### p>0.5 {.tabset}
+#### Treino
+```{r}
+metrics_m1(0.5,"treino")
+```
+#### Teste
+```{r}
+metrics_m1(0.5,"teste")
+```
+
+### p>0.7 {.tabset}
+#### Treino
+```{r}
+metrics_m1(0.7,"treino")
+```
+#### Teste
+```{r}
+metrics_m1(0.7,"teste")
+```
+
+### p>0.9 {.tabset}
+#### Treino
+```{r}
+metrics_m1(0.9,"treino")
+```
+#### Teste
+```{r}
+metrics_m1(0.9,"teste")
+```
+
+
+## Curva ROC
+
+Observando a curva ROC abaixo, e os teste para diferentes níveis de *thresholds* e assumindo prioridade para uma especificidade maior, tendo em visto a redução da problabilidade de diagnósticos falso negativos, acredito que o *threshold* de **0.3** é a malhor faixa. Assim, por se tratar de um problema de diagnóstico médico, é preferível correr o risco de dar um diagnóstico positivo quando o estado verdadeiro do paciente é negativo, do que o contrário. 
+
+
+```{r}
+par(pty="s")
+roc(treino[,4], fitted(m1), plot=TRUE, legacy.axes=TRUE, percent=TRUE,
+    xlab="% Falso Positivo (Especificidade)", ylab="% Verdadeiro Positivo (Sensibilidade)",
+    lwd=5, col="deepskyblue3", print.auc=TRUE)
+
+#par(pty="s")
+#roc(treino[,4], fitted(m1), plot=TRUE, legacy.axes=TRUE, percent=TRUE,
+#    xlab="% Falso Positivo", ylab="% Verdadeiro Positivo",
+#    lwd=5, col="deepskyblue3", print.auc=TRUE)
+
+# SObreponto a curva de outra modelo para comparação
+#plot.roc(treino[,4]^2, fitted(m1)^3, add=TRUE, percent=TRUE,
+    #lwd=1, col="green", print.auc=TRUE, print.auc.y=40)
+#legend("bottomright", legend=c("m1","m2"), col=c("deepskyblue3","green"), lwd =4)
+
+par(pty="m")
+```
+
+
+## Teste de Prevalência e Razão de custos
+
+Utilizando os dados de teste (25% da base total), vamos testar diferentes valores de prevalência (proporção de nódulos malignos na população) e atribuir diferentes razões de custo para ponderar quantas vezes um falso negativo é mais “caro” que um falso positivo, e encontrar quais seriam os *thresholds* ideais em cada cenário.
+
+Vamos testar as seguintes combinações de Prevalência e Razão de Custo:
+
+- i. Prevalência = 0.5; razão de custos =2
+- ii. Prevalência = 0.2; razão de custos =2
+- iii. Prevalência = 0.5; razão de custos =10
+- iv. Prevalência = 0.2; razão de custos =2
+
+```{r}
+teste_pred <- predict(m1, newdata = teste[,-4], type = 'response')
+r2 <- roc(teste$Class, teste_pred)
+
+i <- coords(roc = r2, x = "best", ret = c("threshold"), best.method = "youden", best.weights=c(2, 0.5))
+ii <- coords(roc = r2, x = "best", ret = c("threshold"), best.method = "youden", best.weights=c(2, 0.2))
+iii <- coords(roc = r2, x = "best", ret = c("threshold"), best.method = "youden", best.weights=c(10, 0.5))
+iv <- coords(roc = r2, x = "best", ret = c("threshold"), best.method = "youden", best.weights=c(2, 0.2))
+```
+
+Neste caso, a melhor regra de classificação (ponto de corte) para cada cenário é apresentada abaixo :
+
+```{r}
+cenarios_df <- data.frame(cenário = c("i", "ii", "iii", "iv"), p = c(i[[1]], ii[[1]], iii[[1]], iv[[1]])) 
+cenarios_df %>%
+  kbl() %>%
+  kable_material_dark(c("striped", "hover"))
+```
+
+# Fit do modelo: base completa
+
+## Modelo ajustado
+
+Vamos rodar o modelo para a base toda, seguindo com as mesmas configurações de família e link.
+
+```{r}
+m2 <- glm(Class ~ .,data = df, family = binomial(link='logit'))
+summary(m2)
+
+# Armazenando os coeficientes encontrados na escala do preditor (log-odds)
+CT_estimate_m2 <- as.character(round(m2$coefficients[2],3))
+MA_estimate_m2 <- as.character(round(m2$coefficients[3],3))
+BC_estimate_m2 <- as.character(round(m2$coefficients[4],3))
+
+df_estimate_m2 <- data.frame("CT"=CT_estimate_m2, "MA"=MA_estimate_m2, "BC"=BC_estimate_m2)
+
+
+# Armazenando os coeficientes encontrados na escala da probabilidade das respostas (odds)
+CT_estimate_m2_exp <- as.character(round(exp(m2$coefficients[2]),3))
+MA_estimate_m2_exp <- as.character(round(exp(m2$coefficients[3]),3))
+BC_estimate_m2_exp <- as.character(round(exp(m2$coefficients[4]),3))
+
+df_estimate_m2_exp <- data.frame("CT"=CT_estimate_m2_exp, "MA"=MA_estimate_m2_exp, "BC"=BC_estimate_m2_exp)
+```
+
+Com o modelo treinado, temos os coeficientes do modelo na *escala do preditor* (*log-odds*) é expresso abaixo:
+
+```{r}
+
+df_estimate_m2 %>%
+  kbl() %>%
+  kable_material_dark(c("striped", "hover"))
+```
+
+Para a escala da resposta (*probabilidade*), após aplicado a tranformação exponecial dos dados antes em termos de log, temos os seguintes coeficientes:
+
+```{r}
+df_estimate_m2_exp %>%
+  kbl() %>%
+  kable_material_dark(c("striped", "hover"))
+```
+
+## Análise do ajuste
+
+É possível observar que todas as variáveis continuam apresentando significância estatísticas pelo teste de wald e com erros médios baixo. Além disso, apresentam uma mediana dos resíduos próxima de zero, o que indica que erros estão próximo da mediana, não apresentando desbalancemento dos erros.
+Todas as variáveis apresentam efeitos positivos, ou seja, para cada unidade a mais de cada uma das variáveis em conjunto, as chances de se obter um diagnóstico de um nódulo maligno é maior, em especial para as variáveis *CT* e *BC*.
+
+* Para cada unidade a mais de *CT*, as chances do nódulo ser maligno aumenta para `r CT_estimate_m2_exp`, fixado os valores das demais variáveis.
+* Para cada unidade a mais de *MA*, as chances do nódulo ser maligno aumenta para `r MA_estimate_m2_exp`, fixado os valores das demais variáveis.
+* Para cada unidade a mais de *BC*, as chances do nódulo ser maligno aumenta para `r BC_estimate_m2_exp`, fixado os valores das demais variáveis.
+
+## Intervalos de confiância
+
+Na tabela abaixo temos os intervalos de confiância dos parâmetros em ambas as escalas: predito(logOR) e resposta(OR).
+
+```{r}
+conf_int_tb <- cbind(logOR = coef(m2), confint(m2),OR = exp(coef(m2)), exp(confint(m2))) #na escala do preditor e da resposta, respectivamente
+conf_int_tb %>%
+  kbl() %>%
+  kable_material_dark(c("striped", "hover"))
+```
+
+## Predict novo registro
+
+Abaixo temos as chances e a probabilidades estimadas para o diagnósitco de um nódulo novo, que não foi utilizado no treino nem no teste, com os seguintes para as variáveis explicativas: CT = 5, MA = 3 e BC = 4.
+
+A predição na escala do preditor(log) é:
+```{r }
+new_predict_preditor <- predict(m2, newdata = data.frame(CT = 5, MA = 3, BC = 4)) 
+
+new_predict_preditor %>%
+  kbl() %>%
+  kable_material_dark(c("striped", "hover"))
+```
+
+Enquanto que a predição na escala da resposta (probabilidade) é:
+```{r}
+new_predict_resposta <- predict(m2, newdata = data.frame(CT = 5, MA = 3, BC = 4), type = "response") #predição na escala da resposta (probabilidade, inversa do link = logit)
+new_predict_resposta %>%
+  kbl() %>%
+  kable_material_dark(c("striped", "hover", "responsive"))
+```
+
+Ou seja, o diagnóstico nos dá uma probabilidade de que o nódulo seja maligno de `r new_predict_resposta`. Se consideramos um **threshold** de 0,3, devemos classificar o nódulo como maligno, de acordo com o modelo ajustado.
+
+## Análise de diagnóstico
+
+A análise dos resíduos abaixo não indica a presença de multicolinearidade, não apresenta valores muito influêntes na regressão e possui normalidade nos resíduos. Apenas a homogeneidade da variância aparente estar um pouco desajustada nas extremidades da distribuição, e contar com 2 outliers no canto superir direito do gráfico.
+
+```{r}
+check_model(m2)
+```
+
+
+# Conclusão
+
+Os ajustes realizaddos garantiram uma explicabilidade da variável de interesse com um nível significativo. Existem algumas melhorias que ainda podem ser feitas, como os outliers encontrados no gráfico da Homogeneidade da Variância mostrado na análise dos resíduos e uma análise mais detalhada da relação das variáveis em busca de relações não lineares. Tais análises podem melhorar ainda mais a performance do modelo. 
+
+Gostaria de deixar registrado que este projeto me ajudou muito a comprender melhor o processo de ajuste de um modelo de regressão logística, bem como a validação e testes do mesmo. Pude aplicar diversos conceitos estatísticos vistos em aula e entender melhor o grau de complexidade na composição de um modelo logito completo.
+
+<hr>
+# Referências
+
+- Yihui Xie, J. J. Allaire, Garrett Grolemund. R Markdown: The Definitive Guide. [link](https://bookdown.org/yihui/rmarkdown/html-document.html#table-of-contents). 
+- A. Kassambara. [link](http://www.sthda.com/english/)
+- Yukio. Separando a base de treino e teste no R. [link](https://estatsite.com.br/2018/08/18/separando-a-base-treino-e-teste-no-r/)
+-  Yan Holtz. [link](https://www.r-graph-gallery.com/)
+- Colors in R. [link](http://www.stat.columbia.edu/~tzheng/files/Rcolor.pdf)
+- Max Kuhn. The Caret Package. [link](https://topepo.github.io/caret/measuring-performance.html)
+- confusionMatrix: Create a confusion matrix. [link](https://www.rdocumentation.org/packages/caret/versions/6.0-88/topics/confusionMatrix)
+- Hao Zhu. Create Awesome HTML Table with knitr::kable and kableExtra. [link](https://cran.r-project.org/web/packages/kableExtra/vignettes/awesome_table_in_html.html#Installation)
+- Josh Starmer. ROC and AUC in R. [link](https://www.youtube.com/watch?v=qcvAqAH60Yw)
+- Jualiana Guamá. Métricas de avaliação de classificadores. [link](https://medium.com/pyladiesbh/m%C3%A9tricas-de-avalia%C3%A7%C3%A3o-de-classificadores-6aadc3dacd51)
+- Doug Steen. Understanding the ROC Curve and AUC. [link](https://towardsdatascience.com/understanding-the-roc-curve-and-auc-dd4f9a192ecb)
